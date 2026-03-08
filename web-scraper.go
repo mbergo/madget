@@ -502,7 +502,8 @@ func (s *Scraper) makeAbsoluteURL(link string, base *url.URL) string {
 	// Skip mailto, javascript, data URIs, and fragments
 	if strings.HasPrefix(link, "mailto:") || strings.HasPrefix(link, "javascript:") ||
 		strings.HasPrefix(link, "#") || strings.HasPrefix(link, "data:") ||
-		strings.HasPrefix(link, "tel:") || strings.HasPrefix(link, "blob:") {
+		strings.HasPrefix(link, "tel:") || strings.HasPrefix(link, "blob:") ||
+		strings.HasPrefix(link, "vbscript:") {
 		return ""
 	}
 
