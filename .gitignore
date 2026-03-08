@@ -1,0 +1,29 @@
+# Binary
+web-scraper
+web-scraper.exe
+bin/
+build/
+
+# Downloads
+downloads/
+
+# Test and coverage
+*.test
+*.out
+coverage.html
+cpu.prof
+mem.prof
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Temp
+tmp/
