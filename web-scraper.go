@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/html"
@@ -79,7 +81,7 @@ func isStaticAssetURL(urlStr string) bool {
 	return assetExts[ext]
 }
 
-func NewScraper(baseURL string, maxDepth, maxWorkers int, outputDir string, httpTracking, convertLinks bool) (*Scraper, error) {
+func NewScraper(baseURL string, maxDepth, maxWorkers int, outputDir string, httpTracking, convertLinks bool, proxyURL string) (*Scraper, error) {
 	parsedURL, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid URL: %w", err)
@@ -93,6 +95,17 @@ func NewScraper(baseURL string, maxDepth, maxWorkers int, outputDir string, http
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	// Proxy: explicit flag wins, then HTTP_PROXY/HTTPS_PROXY env vars
+	if proxyURL != "" {
+		parsed, err := url.Parse(proxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid proxy URL: %w", err)
+		}
+		tr.Proxy = http.ProxyURL(parsed)
+	} else {
+		tr.Proxy = http.ProxyFromEnvironment
 	}
 
 	client := &http.Client{
@@ -811,7 +824,8 @@ func main() {
 	outputDir := flag.String("output", "./downloads", "Output directory")
 	httpTracking := flag.Bool("track", false, "Enable HTTP request tracking")
 	convertLinks := flag.Bool("convert", true, "Convert absolute links to relative (like wget -k)")
-	timeout := flag.Int("timeout", 600, "Overall timeout in seconds")
+	timeout := flag.Int("timeout", 600, "Overall timeout in seconds (0 = no timeout)")
+	proxyURL := flag.String("proxy", "", "Proxy URL, e.g. socks5://127.0.0.1:1080 or http://proxy:8080 (falls back to HTTP_PROXY/HTTPS_PROXY env vars)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options] <URL>\n\n", os.Args[0])
@@ -832,15 +846,22 @@ func main() {
 	targetURL := flag.Arg(0)
 
 	// Create scraper
-	scraper, err := NewScraper(targetURL, *maxDepth, *maxWorkers, *outputDir, *httpTracking, *convertLinks)
+	scraper, err := NewScraper(targetURL, *maxDepth, *maxWorkers, *outputDir, *httpTracking, *convertLinks, *proxyURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating scraper: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeout)*time.Second)
-	defer cancel()
+	// Graceful shutdown: Ctrl+C cancels downloads but link conversion still runs
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Apply overall timeout on top of signal context
+	if *timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(*timeout)*time.Second)
+		defer cancel()
+	}
 
 	// Run scraper
 	if err := scraper.Run(ctx); err != nil {
